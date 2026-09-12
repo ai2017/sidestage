@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SideStage Seller Console</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, Segoe UI, Roboto, sans-serif; background: #f6f5f3; color: #1c1c1e; }
+  header { padding: 14px 20px; background: #111827; color: #fff; display: flex; align-items: center; justify-content: space-between; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .tag { font-size: 12px; color: #9ca3af; }
+  .layout { display: grid; grid-template-columns: 1.3fr 1fr; gap: 14px; padding: 14px; max-width: 1300px; margin: 0 auto; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+  .panel { background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; margin: 0 0 10px; }
+  .feed { max-height: 560px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+  .msg { border: 1px solid #eee; border-radius: 8px; padding: 10px 12px; }
+  .msg .viewer { font-weight: 600; font-size: 13px; }
+  .msg .text { color: #374151; font-size: 13px; margin: 2px 0 8px; }
+  .badge { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 999px; margin-right: 6px; font-weight: 600; }
+  .badge.sent { background: #dcfce7; color: #166534; }
+  .badge.suggested { background: #fef3c7; color: #92400e; }
+  .badge.intent { background: #e5e7eb; color: #374151; }
+  .reply { background: #f9fafb; border-left: 3px solid #9ca3af; padding: 8px 10px; font-size: 13px; border-radius: 0 6px 6px 0; }
+  .reply.corrected { border-left-color: #f59e0b; }
+  .reply.blocked-ish { border-left-color: #ef4444; }
+  .violation { font-size: 12px; color: #b91c1c; margin-top: 6px; }
+  .meta { font-size: 11px; color: #9ca3af; margin-top: 6px; }
+  button { cursor: pointer; border: 1px solid #d1d5db; background: #fff; border-radius: 6px; padding: 6px 10px; font-size: 12px; }
+  button:hover { background: #f3f4f6; }
+  button.primary { background: #111827; color: #fff; border-color: #111827; }
+  .row { display: flex; gap: 8px; margin-top: 10px; }
+  input[type=text] { flex: 1; padding: 7px 10px; border: 1px solid #d1d5db; border-radius: 6px; font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 5px 4px; border-bottom: 1px solid #f0f0f0; }
+  select { font-size: 12px; padding: 3px; }
+  .stock-row td:nth-child(3) { font-variant-numeric: tabular-nums; }
+  .low { color: #b91c1c; font-weight: 600; }
+  .audit-row button { font-size: 11px; padding: 3px 7px; }
+  .pill { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: #eef2ff; color: #3730a3; }
+</style>
+</head>
+<body>
+<header>
+  <h1>SideStage &mdash; Live Selling Copilot</h1>
+  <span class="tag">Maya's Boutique &middot; console (prototype)</span>
+</header>
+
+<div class="layout">
+  <div>
+    <div class="panel">
+      <h2>Live chat &amp; copilot replies</h2>
+      <div class="row">
+        <button class="primary" onclick="startSimulation()">▶ Run simulated chat stream</button>
+        <input type="text" id="viewerInput" placeholder="viewer name" style="max-width:120px" value="you" />
+        <input type="text" id="textInput" placeholder="type a chat message…" onkeydown="if(event.key==='Enter')sendMessage()" />
+        <button onclick="sendMessage()">Send</button>
+      </div>
+      <div id="feed" class="feed" style="margin-top:12px"></div>
+    </div>
+  </div>
+
+  <div>
+    <div class="panel">
+      <h2>Automation ladder</h2>
+      <table id="ladderTable"></table>
+      <div class="meta">0 = suggest only &middot; 1 = auto-send reply &middot; 2 = auto-send + auto-act (bound action)</div>
+    </div>
+
+    <div class="panel">
+      <h2>Listings &amp; stock</h2>
+      <table id="catalogTable"></table>
+    </div>
+
+    <div class="panel">
+      <h2>Audit log</h2>
+      <table id="auditTable"></table>
+    </div>
+  </div>
+</div>
+
+<script>
+const feed = document.getElementById('feed');
+let ws;
+
+function connectWs() {
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+  ws.onmessage = (ev) => {
+    const evt = JSON.parse(ev.data);
+    if (evt.type === 'message') renderMessage(evt);
+    if (evt.type === 'rollback' || evt.type === 'ladder') refreshState();
+  };
+  ws.onclose = () => setTimeout(connectWs, 1500);
+}
+connectWs();
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderMessage(evt) {
+  const div = document.createElement('div');
+  div.className = 'msg';
+  const statusBadge = `<span class="badge ${evt.status}">${evt.status}</span>`;
+  const intentBadge = `<span class="badge intent">${evt.message.intent}</span>`;
+  let replyClass = 'reply';
+  if (evt.guardrail.corrected) replyClass += ' corrected';
+  if (!evt.guardrail.passed) replyClass += ' blocked-ish';
+
+  const violations = evt.guardrail.violations.map(v =>
+    `<div class="violation">⚠ ${v.kind}: ${escapeHtml(v.detail)}</div>`).join('');
+
+  let actionHtml = '';
+  if (evt.action) {
+    actionHtml = `<div class="meta">action executed: <span class="pill">${evt.action.action_type}</span>
+      <button onclick="doRollback('${evt.action.action_id}')">Undo</button></div>`;
+  }
+
+  div.innerHTML = `
+    <div class="viewer">${escapeHtml(evt.message.viewer)} ${statusBadge}${intentBadge}</div>
+    <div class="text">"${escapeHtml(evt.message.text)}"</div>
+    <div class="${replyClass}">${escapeHtml(evt.guardrail.final_text)}</div>
+    ${violations}
+    ${actionHtml}
+    <div class="meta">${evt.draft.backend} backend · ${evt.decision.reason} · ${evt.timings_ms.total}ms</div>
+  `;
+  feed.prepend(div);
+}
+
+async function sendMessage() {
+  const viewer = document.getElementById('viewerInput').value || 'you';
+  const text = document.getElementById('textInput').value.trim();
+  if (!text) return;
+  document.getElementById('textInput').value = '';
+  const res = await fetch('/api/chat', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({viewer, text}),
+  });
+  const data = await res.json();
+  renderMessage({type: 'message', ...data});
+}
+
+async function startSimulation() {
+  await fetch('/api/simulate', {method: 'POST'});
+}
+
+async function doRollback(actionId) {
+  await fetch('/api/rollback/' + actionId, {method: 'POST'});
+}
+
+async function setLadder(intent, level) {
+  await fetch('/api/ladder', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({intent_type: intent, level: parseInt(level)}),
+  });
+}
+
+async function refreshState() {
+  const res = await fetch('/api/state');
+  const state = await res.json();
+
+  const ladderTable = document.getElementById('ladderTable');
+  ladderTable.innerHTML = '<tr><th>Intent</th><th>Level</th></tr>' + Object.entries(state.ladder).map(([intent, level]) => `
+    <tr><td>${intent}</td><td>
+      <select onchange="setLadder('${intent}', this.value)">
+        ${[0,1,2].map(l => `<option value="${l}" ${l===level?'selected':''}>${l}</option>`).join('')}
+      </select>
+    </td></tr>`).join('');
+
+  const bySku = {};
+  state.catalog.forEach(p => bySku[p.sku] = p);
+  const catalogTable = document.getElementById('catalogTable');
+  catalogTable.innerHTML = '<tr><th>Item</th><th>Price</th><th>Live?</th></tr>' + state.listings.map(l => {
+    const p = bySku[l.sku];
+    const price = p.promo_price_cents ? `$${(p.promo_price_cents/100).toFixed(2)} (was $${(p.price_cents/100).toFixed(2)})` : `$${(p.price_cents/100).toFixed(2)}`;
+    return `<tr class="stock-row"><td>${p.name}${l.discount_pct ? ` <span class="pill">-${l.discount_pct}%</span>`:''}</td><td>${price}</td><td>${l.is_live ? '🔴 live' : '—'}</td></tr>`;
+  }).join('');
+
+  const auditTable = document.getElementById('auditTable');
+  auditTable.innerHTML = '<tr><th>Action</th><th>Actor</th><th></th></tr>' + state.recent_audit.slice(0, 10).map(a => `
+    <tr class="audit-row"><td>${a.action_type}</td><td>${a.actor}</td><td>
+      ${a.reversed ? '<span class="pill">reversed</span>' : `<button onclick="doRollback('${a.id}')">Undo</button>`}
+    </td></tr>`).join('');
+}
+
+refreshState();
+setInterval(refreshState, 4000);
+</script>
+</body>
+</html>
