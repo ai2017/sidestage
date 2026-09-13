@@ -7,7 +7,7 @@ Read **PRD.md** for the product story (who this is for, the first workflow, the 
 ## Quickstart
 
 ```bash
-python3 -m venv .my_new_env &&  source ./my_new_env/bin/activate      # optional but recommended
+python3 -m venv .venv &&  source .venv/bin/activate      # optional but recommended, make sure to get the python 3.12 version
 pip install -r requirements.txt
 
 # run the test suite (62 tests: guardrails, retrieval, actions/rollback, ladder, fit/sizing, LLM fallback, latency)
