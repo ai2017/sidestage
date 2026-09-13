@@ -22,12 +22,41 @@ between "which backend produced this."
 
 from __future__ import annotations
 
+import json
 import os
+import re
 from dataclasses import dataclass, field
 from typing import Optional
 
 from sidestage.grounding.retrieval import GroundingTools
 from sidestage.ingestion.stream import ChatMessage
+
+
+# Fit facts live in the catalog description ("...true to size, hand wash
+# cold"), so a fit answer can be grounded in the same store as price and
+# stock rather than improvised. Key = the phrase as it appears in a
+# description; value = the same claim in sentence form for a reply. The
+# guardrail maps the sentence form back to the key and checks it really is
+# in that product's description (guardrails/engine.py::_check_fit).
+FIT_PHRASES = {
+    "true to size": "is true to size",
+    "runs one size small": "runs one size small",
+    "runs one size big": "runs one size big",
+    "runs small": "runs small",
+    "runs big": "runs big",
+    "oversized fit": "has an oversized fit",
+}
+
+
+def fit_phrase_for(product: Optional[dict]) -> Optional[str]:
+    """The fit claim this product's description actually supports, if any."""
+    if not product:
+        return None
+    desc = (product.get("description") or "").lower()
+    for raw in sorted(FIT_PHRASES, key=len, reverse=True):
+        if raw in desc:
+            return raw
+    return None
 
 
 @dataclass
@@ -99,6 +128,28 @@ class TemplateBackend:
             else:
                 text = "Great question — let me check on that policy and get back to you!"
             return ReplyDraft(text, "high" if hits else "low", "template", trace, resolved_sku)
+
+        if message.intent == "fit_question":
+            sizes = json.loads(product["sizes"]) if product else []
+            raw = fit_phrase_for(product)
+            wants_petite = bool(re.search(r"\bpetite\b|\btall\b", message.text.lower()))
+            stocks_petite = any(("petite" in s.lower() or "tall" in s.lower()) for s in sizes)
+
+            if wants_petite and not stocks_petite:
+                # Grounded in the catalog's own size list, not an assumption.
+                tail = f" It {FIT_PHRASES[raw]}." if raw else ""
+                text = (f"We don't carry petite sizing, sorry! The {name} comes in "
+                        f"{', '.join(sizes)}.{tail}")
+                return ReplyDraft(text, "high", "template", trace, resolved_sku)
+
+            if raw:
+                text = f"The {name} {FIT_PHRASES[raw]} — hope that helps!"
+                return ReplyDraft(text, "high", "template", trace, resolved_sku)
+
+            # No fit information in the catalog for this item: say nothing
+            # rather than guess, and let the ladder force suggest-only.
+            text = f"Let me double-check the fit on the {name} and come right back to you!"
+            return ReplyDraft(text, "low", "template", trace, resolved_sku)
 
         if message.intent == "purchase_intent":
             # Check stock before encouraging the sale. Without this, a buyer

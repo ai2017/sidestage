@@ -2,7 +2,7 @@
 
 A real-time seller copilot for live-commerce chat: grounded, guardrailed replies to price/availability/policy questions, plus auditable, reversible listing/inventory actions (push, swap, markdown, stock adjust), gated by a per-intent copilot-to-automation ladder.
 
-Read **PRD.md** for the product story (who this is for, the first workflow, the ladder, the pilot plan, success metrics) and **TDD.md** for the architecture and the reasoning behind each technical decision, including the two failure modes found and fixed while building this (a retrieval bug and a guardrail false-positive), documented as regression tests rather than just fixed silently.
+Read **PRD.md** for the product story (who this is for, the first workflow, the ladder, the pilot plan, success metrics) and **TDD.md** for the architecture and the reasoning behind each technical decision, including the failure modes found and fixed while building and demoing this — a retrieval bug, a guardrail false-positive, and two cases where the copilot said something true that wasn't an answer to the question asked — each documented and locked in as a regression test rather than quietly patched.
 
 ## Quickstart
 
@@ -10,7 +10,7 @@ Read **PRD.md** for the product story (who this is for, the first workflow, the 
 python3 -m venv .venv && source .venv/bin/activate      # optional but recommended
 pip install -r requirements.txt
 
-# run the test suite (36 tests: guardrails, retrieval, actions/rollback, ladder, latency)
+# run the test suite (50 tests: guardrails, retrieval, actions/rollback, ladder, fit/sizing, latency)
 python3 -m pytest -q
 
 # run the seller console

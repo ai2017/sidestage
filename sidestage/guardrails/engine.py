@@ -35,13 +35,14 @@ what fails open vs. closed."
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from typing import Optional
 
 from sidestage.grounding.retrieval import GroundingTools
 from sidestage.ingestion.stream import ChatMessage, contains_profanity
-from sidestage.reply.generator import ReplyDraft
+from sidestage.reply.generator import FIT_PHRASES, ReplyDraft
 
 _MONEY_RE = re.compile(r"\$(\d+(?:\.\d{2})?)")
 _LEFT_RE = re.compile(r"\b(\d+)\s+left\b", re.IGNORECASE)
@@ -95,6 +96,11 @@ class GuardrailEngine:
             policy_violation = self._check_policy(text, message.text)
             if policy_violation:
                 violations.append(policy_violation)
+
+        if draft.resolved_sku and message.intent == "fit_question":
+            fit_violation = self._check_fit(text, draft.resolved_sku)
+            if fit_violation:
+                violations.append(fit_violation)
 
         tone_violation = self._check_tone(text)
         if tone_violation:
@@ -192,6 +198,39 @@ class GuardrailEngine:
                 "looks unsupported rather than grounded.",
                 correctable=False,
             )
+        return None
+
+    def _check_fit(self, text: str, sku: str) -> Optional[Violation]:
+        """Fit claims get the same treatment as prices: re-derived from the
+        catalog, never taken on the generator's word. A model that 'knows'
+        wrap dresses run small will happily say so about an item whose
+        description says the opposite."""
+        product = self.tools.store.get_product(sku)
+        if not product:
+            return None
+        desc = (product["description"] or "").lower()
+        lowered = text.lower()
+
+        for raw, sentence in FIT_PHRASES.items():
+            if sentence in lowered and raw not in desc:
+                return Violation(
+                    "fit",
+                    f"Draft claims the item {sentence!r} but the catalog description is "
+                    f"{product['description']!r}.",
+                    correctable=False,
+                )
+
+        if "don't carry petite" in lowered or "dont carry petite" in lowered:
+            try:
+                sizes = [s.lower() for s in json.loads(product["sizes"])]
+            except (TypeError, ValueError):
+                sizes = []
+            if any("petite" in s for s in sizes):
+                return Violation(
+                    "fit",
+                    "Draft says we don't carry petite, but the catalog lists a petite size.",
+                    correctable=False,
+                )
         return None
 
     def _check_tone(self, text: str) -> Optional[Violation]:

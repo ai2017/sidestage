@@ -105,7 +105,7 @@ def get_state() -> dict:
         "ladder": {
             it: store.ladder_level(it)
             for it in ("price_question", "availability_question", "policy_question",
-                       "purchase_intent", "general")
+                       "fit_question", "purchase_intent", "general")
         },
         "recent_messages": store.recent_messages(30),
         "recent_audit": store.recent_audit(30),

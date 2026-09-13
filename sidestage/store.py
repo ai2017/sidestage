@@ -27,6 +27,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Optional
 
+# Canonical garment size order. Anything not listed sorts to the end,
+# alphabetically, so an unexpected size never crashes the sort.
+SIZE_ORDER = ["XXS", "XS", "S", "M", "L", "XL", "XXL", "XXXL"]
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS catalog (
     sku TEXT PRIMARY KEY,
@@ -144,11 +148,25 @@ class Store:
             return row["stock_qty"] if row else None
 
     def stock_for_sku(self, sku: str) -> dict:
+        """Stock by size, in canonical garment order.
+
+        Without the explicit sort this returns sizes alphabetically -- SQLite
+        satisfies the `WHERE sku = ?` lookup from the composite primary-key
+        index, so rows arrive ordered by size *as text*: L, M, S, XL, XS.
+        That's a defensible database answer and a nonsense answer to a
+        shopper, which is exactly the sort of thing that makes a tool feel
+        broken to the one user we built it for.
+        """
         with self.cursor() as cur:
             rows = cur.execute(
                 "SELECT size, stock_qty FROM inventory WHERE sku = ?", (sku,)
             ).fetchall()
-            return {r["size"]: r["stock_qty"] for r in rows}
+            ordered = sorted(
+                rows,
+                key=lambda r: (SIZE_ORDER.index(r["size"]) if r["size"] in SIZE_ORDER
+                               else len(SIZE_ORDER), r["size"]),
+            )
+            return {r["size"]: r["stock_qty"] for r in ordered}
 
     def all_policies(self) -> list[dict]:
         with self.cursor() as cur:
@@ -318,6 +336,7 @@ def seed(db_path: str, reset: bool = True) -> Store:
             ("price_question", 1),
             ("availability_question", 1),
             ("policy_question", 1),
+            ("fit_question", 1),
             ("purchase_intent", 0),
             ("general", 0),
         ]:

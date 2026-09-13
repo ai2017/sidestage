@@ -42,6 +42,12 @@ _POLICY_PATTERNS = [r"\bshipping\b", r"\breturn\b", r"\brefund\b", r"\bdamaged?\
                      r"\bfake\b", r"\breal\b"]
 _PURCHASE_PATTERNS = [r"\bi'?ll take\b", r"\bsold\b!", r"\bcan i buy\b", r"\badd to cart\b",
                       r"\bi want (it|one|this)\b"]
+_FIT_PATTERNS = [r"\btrue to size\b", r"\bruns? (one size )?(small|big|large)\b", r"\bpetite\b",
+                 r"\bsize (up|down)\b", r"\bsizing\b", r"\bhow does it fit\b", r"\bfits? (me|true)\b",
+                 r"\boversized\b", r"\bstretchy?\b"]
+# Fit language that borrows size words ("runs small") must not be read as a
+# size request; see extract_size.
+_FIT_SIZE_CONTEXT = r"\b(?:runs?|fits?)\s+(?:one\s+size\s+)?{word}\b"
 _PROFANITY = {"damn", "hell", "crap", "shit", "fuck", "ass", "bitch"}  # tone guardrail wordlist
 
 
@@ -63,8 +69,16 @@ def extract_size(text: str) -> Optional[str]:
         return m.group(1).upper()
     lowered = text.lower()
     for word, token in sorted(_SIZE_WORDS.items(), key=lambda kv: -len(kv[0])):
-        if re.search(rf"\b{re.escape(word)}\b", lowered):
-            return token
+        if not re.search(rf"\b{re.escape(word)}\b", lowered):
+            continue
+        # "runs small" / "fits large" describe cut, not a requested size.
+        # Without this check, "do you have anything that runs small" would be
+        # answered with size-S stock counts -- a true statement, and not an
+        # answer to the question asked. The guardrail cannot catch that class
+        # of error, since nothing stated is false (see TDD.md).
+        if re.search(_FIT_SIZE_CONTEXT.format(word=re.escape(word)), lowered):
+            continue
+        return token
     return None
 
 
@@ -74,6 +88,13 @@ def classify_intent(text: str) -> str:
         return "purchase_intent"
     if any(re.search(p, t) for p in _POLICY_PATTERNS):
         return "policy_question"
+    # Fit is checked before availability on purpose. "do you have this in
+    # petite" matches both, and the useful answer is about sizing (we carry
+    # no petite cut) rather than a stock count for a size that doesn't exist
+    # in the catalog. The cost is that a message mixing both ("does it run
+    # small, do you have an M?") answers the fit half only.
+    if any(re.search(p, t) for p in _FIT_PATTERNS):
+        return "fit_question"
     if any(re.search(p, t) for p in _AVAILABILITY_PATTERNS):
         return "availability_question"
     if any(re.search(p, t) for p in _PRICE_PATTERNS):
