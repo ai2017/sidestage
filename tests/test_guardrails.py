@@ -106,3 +106,45 @@ def test_low_confidence_draft_blocks_regardless_of_text(tools):
     result = engine.review(msg, draft)
     assert not result.passed
     assert result.blocking_violations[0].kind == "confidence"
+
+
+# ---- claims phrased the way a live model actually phrased them ----
+#
+# Every case below is real Claude output from the console, or a minimal
+# mutation of it. The originals were caught only because our own template
+# happened to say "N left"; these lock in the broader extraction.
+
+def test_real_llm_phrasing_in_stock_is_verified_not_skipped(tools):
+    """Observed live: "Yes! We have the coral dress in size M—we've got 5 in
+    stock right now." Correct, and it must pass."""
+    engine = GuardrailEngine(tools)
+    msg = make_message("v1", "do you have the coral one in a M?")
+    msg.size_hint = "M"
+    draft = ReplyDraft("Yes! We have the coral dress in size M—we've got 5 in stock right now. "
+                        "Ready to grab one?", "high", "llm", resolved_sku="DRS-CORAL-01")
+    assert engine.review(msg, draft).passed
+
+
+def test_same_phrasing_with_a_wrong_number_is_blocked(tools):
+    """The same sentence with an inflated count. Before the fix this passed,
+    because the extractor only understood the word "left"."""
+    engine = GuardrailEngine(tools)
+    msg = make_message("v1", "do you have the coral one in a M?")
+    msg.size_hint = "M"
+    draft = ReplyDraft("Yes! We have the coral dress in size M—we've got 50 in stock right now.",
+                        "high", "llm", resolved_sku="DRS-CORAL-01")
+    result = engine.review(msg, draft)
+    assert not result.passed
+    assert result.blocking_violations[0].kind == "availability"
+
+
+def test_alternative_quantity_phrasings_are_all_checked(tools):
+    engine = GuardrailEngine(tools)
+    msg = make_message("v1", "how many in M?")
+    msg.size_hint = "M"
+    for bad in ["There are 40 available in that size.",
+                "Only 12 remaining!",
+                "We have 9 units of that one.",
+                "I've got 30 pieces left."]:
+        result = engine.review(msg, ReplyDraft(bad, "high", "llm", resolved_sku="DRS-CORAL-01"))
+        assert not result.passed, bad

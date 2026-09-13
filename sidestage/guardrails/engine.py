@@ -45,7 +45,21 @@ from sidestage.ingestion.stream import ChatMessage, contains_profanity
 from sidestage.reply.generator import FIT_PHRASES, ReplyDraft
 
 _MONEY_RE = re.compile(r"\$(\d+(?:\.\d{2})?)")
-_LEFT_RE = re.compile(r"\b(\d+)\s+left\b", re.IGNORECASE)
+# Quantity claims, in the many shapes a real model writes them.
+#
+# This started life as a single `(\d+)\s+left` pattern -- which was fitted,
+# without anyone noticing, to the exact phrasing of our own TemplateBackend
+# ("We have 5 left of the ..."). The first live Claude-drafted reply said
+# "we've got 5 in stock right now" and sailed past the numeric check
+# completely: the guardrail's other rules happened to pass it, so a wrong
+# number would have gone out unchallenged. Claim extraction coupled to one
+# generator's phrasing is claim extraction that stops working the moment the
+# generator changes. See TDD.md, "When the verifier is fitted to the thing
+# it verifies."
+_QTY_RES = [
+    re.compile(r"\b(\d+)\s+(?:left|remaining|available|in stock|units?|pieces?)\b", re.I),
+    re.compile(r"\b(?:only|just|have|has|got|there(?:'s|\s+is|\s+are))\s+(\d+)\b", re.I),
+]
 _SOLD_OUT_RE = re.compile(r"\bsold out\b|\bout of stock\b|\bno more\b", re.IGNORECASE)
 _IN_STOCK_RE = re.compile(r"\byes[!,]?\s+we have\b|\bin stock\b|\bwe'?ve got\b", re.IGNORECASE)
 _DISMISSIVE_RE = re.compile(r"figure it out|not my problem|read the description", re.IGNORECASE)
@@ -157,15 +171,16 @@ class GuardrailEngine:
             by_size = stock.get("by_size", {})
             qty = sum(by_size.values())
 
-        left_match = _LEFT_RE.search(text)
-        if left_match:
-            claimed = int(left_match.group(1))
-            if claimed > qty:
-                return Violation(
-                    "availability",
-                    f"Draft claims {claimed} left but actual stock is {qty}.",
-                    correctable=False,
-                )
+        claimed_quantities = {
+            int(m.group(1)) for rx in _QTY_RES for m in rx.finditer(text)
+        }
+        overclaimed = [c for c in claimed_quantities if c > qty]
+        if overclaimed:
+            return Violation(
+                "availability",
+                f"Draft claims {max(overclaimed)} units but actual stock is {qty}.",
+                correctable=False,
+            )
         if _SOLD_OUT_RE.search(text) and qty > 0:
             return Violation(
                 "availability",

@@ -37,7 +37,8 @@ _SIZE_WORDS = {
 
 _PRICE_PATTERNS = [r"\bhow much\b", r"\bprice\b", r"\bcost\b", r"\$"]
 _AVAILABILITY_PATTERNS = [r"\bin stock\b", r"\bavailable\b", r"\bdo you have\b", r"\bleft\b",
-                          r"\bsold out\b", r"\bany more\b"]
+                          r"\bsold out\b", r"\bany more\b", r"\bhow many\b", r"\bstill got\b",
+                          r"\bany\s+\w+\s+left\b"]
 _POLICY_PATTERNS = [r"\bshipping\b", r"\breturn\b", r"\brefund\b", r"\bdamaged?\b", r"\bauthentic\b",
                      r"\bfake\b", r"\breal\b"]
 _PURCHASE_PATTERNS = [r"\bi'?ll take\b", r"\bsold\b!", r"\bcan i buy\b", r"\badd to cart\b",

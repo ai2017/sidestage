@@ -210,7 +210,13 @@ class LLMBackend:
     def __init__(self, model: Optional[str] = None, budget_s: Optional[float] = None) -> None:
         import anthropic  # imported lazily; only needed on this path
 
-        self._client = anthropic.Anthropic()
+        # max_retries=0 is load-bearing, not a preference. The SDK defaults to
+        # 2 retries and applies `timeout` PER ATTEMPT, so a 2.0s budget silently
+        # became 2.0s x 3 attempts: observed in the console as a 3999.85ms reply
+        # under a 2000ms budget. Inside a live-stream reply budget a retry is
+        # worth less than an immediate grounded fallback, so retrying is our
+        # decision to make, not the SDK's.
+        self._client = anthropic.Anthropic(max_retries=0)
         self._model = model or os.environ.get("SIDESTAGE_MODEL", DEFAULT_MODEL)
         self._budget_s = budget_s if budget_s is not None else float(
             os.environ.get("SIDESTAGE_LLM_BUDGET_S", DEFAULT_LLM_BUDGET_S))

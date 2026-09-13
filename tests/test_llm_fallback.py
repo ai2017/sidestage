@@ -105,3 +105,33 @@ def test_model_id_is_configurable_by_env(monkeypatch):
     backend = LLMBackend.__new__(LLMBackend)
     import os
     assert os.environ.get("SIDESTAGE_MODEL", DEFAULT_MODEL) == "claude-sonnet-4-5"
+
+
+def test_sdk_retries_are_disabled_so_the_budget_is_a_real_wall_clock(monkeypatch):
+    """The SDK applies `timeout` per attempt and defaults to 2 retries, so a
+    2.0s budget silently became ~6s of worst-case wall clock -- observed live
+    as a 3999.85ms reply under a 2000ms budget. The fakes in this file never
+    caught it because a hand-written double retries nothing; only the real
+    client does. Assert against the real client's configuration."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-not-a-real-key-for-construction-only")
+    backend = LLMBackend(model="test-model", budget_s=2.0)
+    assert backend._client.max_retries == 0
+
+
+def test_per_request_timeout_never_exceeds_remaining_budget(tools):
+    """Whatever the loop does, no single call may be given more time than the
+    budget has left."""
+    seen: list[float] = []
+
+    class _CapturingMessages:
+        def create(self, **kwargs):
+            seen.append(kwargs["timeout"])
+            raise RuntimeError("stop here")
+
+    class _CapturingClient:
+        def __init__(self):
+            self.messages = _CapturingMessages()
+
+    backend = _backend_with(_CapturingClient(), budget_s=1.5)
+    backend.draft(make_message("v1", "how much is the coral dress"), tools, "DRS-CORAL-01")
+    assert seen and all(t <= 1.5 for t in seen)
