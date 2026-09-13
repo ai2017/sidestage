@@ -2,7 +2,7 @@
 
 A real-time seller copilot for live-commerce chat: grounded, guardrailed replies to price/availability/policy questions, plus auditable, reversible listing/inventory actions (push, swap, markdown, stock adjust), gated by a per-intent copilot-to-automation ladder.
 
-Read **PRD.md** for the product story (who this is for, the first workflow, the ladder, the pilot plan, success metrics) and **TDD.md** for the architecture and the reasoning behind each technical decision, including the failure modes found and fixed while building and demoing this — a retrieval bug, a guardrail false-positive, and two cases where the copilot said something true that wasn't an answer to the question asked — each documented and locked in as a regression test rather than quietly patched.
+Read **SYSTEM_DESIGN.md** for the message-in/reply-out trace and a plain answer to "which part is the AI". Read **PRD.md** for the product story (who this is for, the first workflow, the ladder, the pilot plan, success metrics) and **TDD.md** for the architecture and the reasoning behind each technical decision, including the failure modes found and fixed while building and demoing this — a retrieval bug, a guardrail false-positive, and two cases where the copilot said something true that wasn't an answer to the question asked — each documented and locked in as a regression test rather than quietly patched.
 
 ## Quickstart
 
