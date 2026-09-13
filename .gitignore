@@ -4,3 +4,7 @@ __pycache__/
 data/*.db
 .venv/
 *.egg-info/
+
+# Local secrets -- never commit an API key
+.env
+.envrc

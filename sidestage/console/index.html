@@ -135,6 +135,7 @@ function renderMessage(evt) {
     <div class="${replyClass}">${escapeHtml(evt.guardrail.final_text)}</div>
     ${violations}
     ${actionHtml}
+    ${evt.draft.fallback_reason ? `<div class="violation">⚠ model unavailable, answered from the catalog instead — ${escapeHtml(evt.draft.fallback_reason)}</div>` : ''}
     <div class="meta">${evt.draft.backend} backend · ${evt.decision.reason} · ${evt.timings_ms.total}ms</div>
   `;
   feed.prepend(div);

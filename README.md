@@ -10,7 +10,7 @@ Read **SYSTEM_DESIGN.md** for the message-in/reply-out trace and a plain answer 
 python3 -m venv .venv && source .venv/bin/activate      # optional but recommended
 pip install -r requirements.txt
 
-# run the test suite (50 tests: guardrails, retrieval, actions/rollback, ladder, fit/sizing, latency)
+# run the test suite (57 tests: guardrails, retrieval, actions/rollback, ladder, fit/sizing, LLM fallback, latency)
 python3 -m pytest -q
 
 # run the seller console

@@ -52,6 +52,7 @@ def serialize_result(res) -> dict:
         "draft": {
             "text": res.draft.text, "confidence": res.draft.confidence,
             "backend": res.draft.backend, "tool_trace": res.draft.tool_trace,
+            "fallback_reason": res.draft.fallback_reason,
         },
         "guardrail": {
             "passed": res.guardrail.passed,

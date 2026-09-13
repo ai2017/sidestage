@@ -25,8 +25,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Optional
+
+
+class _BudgetExceeded(Exception):
+    """The tool-use loop ran past its wall-clock budget."""
 
 from sidestage.grounding.retrieval import GroundingTools
 from sidestage.ingestion.stream import ChatMessage
@@ -66,6 +71,10 @@ class ReplyDraft:
     backend: str     # "llm" | "template"
     tool_trace: list[dict] = field(default_factory=list)
     resolved_sku: Optional[str] = None
+    # Set when the LLM backend was configured but the call failed or ran over
+    # budget, and this draft came from the deterministic fallback instead.
+    # Surfaced in the console so a degraded reply is never silently degraded.
+    fallback_reason: Optional[str] = None
 
 
 class TemplateBackend:
@@ -173,19 +182,60 @@ class TemplateBackend:
         return ReplyDraft(text, "low", "template", trace, resolved_sku)
 
 
+DEFAULT_MODEL = "claude-3-5-haiku-latest"
+DEFAULT_LLM_BUDGET_S = 2.0
+
+
 class LLMBackend:
     """Real Claude tool-use loop. Only exercised when ANTHROPIC_API_KEY is set;
     kept behind the same interface as TemplateBackend so swapping backends is
-    a one-line change (see ReplyGenerator.__init__)."""
+    a one-line change (see ReplyGenerator.__init__).
 
-    def __init__(self, model: str = "claude-3-5-haiku-latest") -> None:
+    Two operational guarantees live here, both learned the hard way when a
+    404 on an unavailable model alias took the whole console down with a 500:
+
+      * **The model is never load-bearing.** Any API failure -- model not
+        available to this key, rate limit, timeout, network down -- falls back
+        to TemplateBackend for that message and records why. A seller mid-
+        stream gets a grounded reply from the catalog instead of an error.
+      * **There is a wall-clock budget.** SIDESTAGE_LLM_BUDGET_S (default 2.0s,
+        matching the PRD's reply-latency target) is checked before every turn
+        of the tool-use loop, because a bounded turn count is not a bounded
+        duration. Exceeding it falls back the same way.
+
+    Configure with SIDESTAGE_MODEL to pick a model this API key can actually
+    reach (`anthropic.Anthropic().models.list()` will tell you which).
+    """
+
+    def __init__(self, model: Optional[str] = None, budget_s: Optional[float] = None) -> None:
         import anthropic  # imported lazily; only needed on this path
 
         self._client = anthropic.Anthropic()
-        self._model = model
+        self._model = model or os.environ.get("SIDESTAGE_MODEL", DEFAULT_MODEL)
+        self._budget_s = budget_s if budget_s is not None else float(
+            os.environ.get("SIDESTAGE_LLM_BUDGET_S", DEFAULT_LLM_BUDGET_S))
+        self._fallback = TemplateBackend()
 
     def draft(self, message: ChatMessage, tools: GroundingTools,
               resolved_sku: Optional[str]) -> ReplyDraft:
+        try:
+            return self._draft_via_model(message, tools, resolved_sku)
+        except _BudgetExceeded:
+            return self._fall_back(message, tools, resolved_sku,
+                                    f"model call exceeded {self._budget_s}s budget")
+        except Exception as exc:  # anthropic.APIError and anything else
+            return self._fall_back(message, tools, resolved_sku,
+                                    f"{type(exc).__name__}: {exc}")
+
+    def _fall_back(self, message: ChatMessage, tools: GroundingTools,
+                    resolved_sku: Optional[str], reason: str) -> ReplyDraft:
+        draft = self._fallback.draft(message, tools, resolved_sku)
+        draft.fallback_reason = reason
+        return draft
+
+    def _draft_via_model(self, message: ChatMessage, tools: GroundingTools,
+                          resolved_sku: Optional[str]) -> ReplyDraft:
+        deadline = time.monotonic() + self._budget_s
         trace: list[dict] = []
         system = (
             "You are a live-shopping seller's chat copilot. Use tools to look up any "
@@ -198,9 +248,12 @@ class LLMBackend:
         tool_schemas = tools.tool_schemas()
 
         for _ in range(4):  # bounded tool-use loop
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise _BudgetExceeded()
             resp = self._client.messages.create(
                 model=self._model, max_tokens=300, system=system,
-                tools=tool_schemas, messages=messages,
+                tools=tool_schemas, messages=messages, timeout=remaining,
             )
             messages.append({"role": "assistant", "content": resp.content})
             if resp.stop_reason != "tool_use":
