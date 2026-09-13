@@ -14,7 +14,7 @@ pip install -r requirements.txt
 python3 -m pytest -q
 
 # Set `ANTHROPIC_API_KEY` in the environment to switch to the real Claude tool-use backend (`sidestage/reply/generator.py: LLMBackend`) and the model. The key expires in 7 days but to raise the ceiling > 2s, set sidestage llm budget to 10
- export ANTHROPIC_API_KEY="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"
+ export ANTHROPIC_API_KEY=""
 
 # Use sonnet model or claude-haiku-4-5-20251001
  export SIDESTAGE_MODEL="claude-sonnet-4-5-20250929"
