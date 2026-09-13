@@ -99,7 +99,19 @@ function escapeHtml(s) {
   return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
 
+// A message you send yourself arrives twice: once as the POST response in
+// sendMessage(), once as the websocket broadcast echoed back to every client
+// including this one. Both carry the same message.id (assigned once in
+// make_message), so dedupe on it rather than dropping either path -- that
+// keeps the instant local render while making the echo (and any reconnect
+// replay) harmless. The server-side fix would be to exclude the originating
+// socket from the broadcast; see TDD.md known limitations.
+const seenMessageIds = new Set();
+
 function renderMessage(evt) {
+  if (seenMessageIds.has(evt.message.id)) return;
+  seenMessageIds.add(evt.message.id);
+
   const div = document.createElement('div');
   div.className = 'msg';
   const statusBadge = `<span class="badge ${evt.status}">${evt.status}</span>`;

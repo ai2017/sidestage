@@ -101,6 +101,20 @@ class TemplateBackend:
             return ReplyDraft(text, "high" if hits else "low", "template", trace, resolved_sku)
 
         if message.intent == "purchase_intent":
+            # Check stock before encouraging the sale. Without this, a buyer
+            # claiming a sold-out size gets "grab it before it's gone" -- and
+            # while the action layer correctly refuses to drive stock negative
+            # (pipeline._execute_bound_action swallows the ActionError), the
+            # *reply* would still have promised something we can't deliver.
+            # The guardrail can't catch this one for us: the cheerful text
+            # makes no stock claim for _check_availability to compare against.
+            size = message.size_hint
+            if size:
+                stock = call("lookup_stock", sku=resolved_sku, size=size)
+                if stock.get("known_size") and stock["stock_qty"] <= 0:
+                    text = (f"Ah — the {name} just sold out in size {size.upper()}, sorry! "
+                            "I'll flag it if we restock.")
+                    return ReplyDraft(text, "high", "template", trace, resolved_sku)
             text = f"Yay, so glad you want the {name}! Tap the pinned link/cart to grab it before it's gone."
             return ReplyDraft(text, "high", "template", trace, resolved_sku)
 
